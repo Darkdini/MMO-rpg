@@ -369,6 +369,7 @@ button{font-family:inherit;background:none;border:0;color:inherit;cursor:pointer
         <button class="sb" data-a="tech" title="Технологии">🔬</button>
         <button class="sb" data-a="reports" title="Отчёты">📨</button>
         <button class="sb" data-a="profile" title="Профиль">👑</button>
+        <button class="sb" id="admin-sb" data-a="admin" title="Админка" style="display:none;color:#ff8080;background:rgba(80,0,0,.7);">⚙</button>
         <button class="sb" data-a="logout" title="Выход">🚪</button>
       </div>
     </div>
@@ -1717,6 +1718,8 @@ async function enterGame(){
   $('#app').style.display='grid';
   preload();
   await refreshState();
+  if(S.player.isAdmin){const ab=$('#admin-sb');if(ab)ab.style.display='';}
+
 
   // Навигация
   $$('.tab').forEach(t=>t.addEventListener('click',()=>{
@@ -1742,6 +1745,7 @@ async function enterGame(){
     else if(a==='tech')showTechModal();
     else if(a==='reports')showReportsModal();
     else if(a==='profile')showProfileModal();
+    else if(a==='admin')showAdminModal();
   }));
 
   connectWS();initChat();initDrag();startAnim();
@@ -1754,6 +1758,38 @@ async function enterGame(){
   setInterval(()=>{if(!ws||ws.readyState!==1)refreshState();},10000);
 }
 
+function showAdminModal(){
+  const con=document.createElement('div');
+  con.style.cssText='display:flex;flex-direction:column;gap:10px;';
+  const actions=[
+    ['💰 Макс. ресурсы + все техи','fill','999 999 всех ресурсов и открыть все 10 технологий'],
+    ['⚡ Завершить все очереди','complete','Мгновенно достроить здания и обучить войска'],
+    ['🏗 +5 уровней всем зданиям','max-buildings','Прокачать все уже построенные здания на 5 уровней'],
+  ];
+  actions.forEach(([label,action,desc])=>{
+    const btn=document.createElement('button');
+    btn.style.cssText='width:100%;padding:13px 14px;background:linear-gradient(180deg,#6a1a1a,#3a0a0a);border:2px solid #c04040;border-radius:7px;color:#fff;font-size:13px;font-weight:bold;cursor:pointer;text-align:left;transition:border-color .15s;';
+    btn.innerHTML=`${label}<div style="font-size:10px;color:#c08080;font-weight:normal;margin-top:3px;">${desc}</div>`;
+    btn.onmouseenter=()=>btn.style.borderColor='#ff8080';
+    btn.onmouseleave=()=>btn.style.borderColor='#c04040';
+    btn.onclick=async()=>{
+      btn.disabled=true;btn.style.opacity='.6';
+      try{
+        await api('/api/admin/'+action,{method:'POST',body:{}});
+        await refreshState();renderTopbar();renderMap();
+        toast('✓ '+label,'ok');bg.remove();
+      }catch(e){toast(e.message,'err');}
+      btn.disabled=false;btn.style.opacity='1';
+    };
+    con.appendChild(btn);
+  });
+  const note=document.createElement('div');
+  note.style.cssText='font-size:10px;color:#806060;text-align:center;margin-top:4px;';
+  note.textContent='Только для администраторов — не использовать в боевой игре';
+  con.appendChild(note);
+  const bg=modal({title:'⚙ Панель администратора',body:con});
+}
+
 function showMenu(){
   const bd=document.createElement('div');
   bd.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:8px;';
@@ -1764,6 +1800,7 @@ function showMenu(){
     ['🔬','Технологии',showTechModal],
     ['💬','Чат',openChat],
     ['🏆','Рейтинг',()=>showRatingModal()],
+    ...(S.player.isAdmin?[['⚙','Админка',showAdminModal]]:[]),
     ['🚪','Выход',()=>{api('/api/logout',{method:'POST'}).then(()=>location.reload());}],
   ].forEach(([i,n,h])=>{
     const c=document.createElement('div');
