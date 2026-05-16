@@ -1,49 +1,96 @@
 # СРЕДНЕВЕКОВЬЕ — Война Королей
 
-## Скачать и запустить через Termux (одна команда)
+---
 
-Первый раз или обновление — скачать проект в папку `proekt`:
+## Установка Termux (один раз)
+
+1. Установи **Termux** из [F-Droid](https://f-droid.org) (не из Play Store — там старая версия)
+2. Открой Termux и выполни:
+
+```bash
+pkg update -y && pkg install nodejs curl unzip -y && termux-setup-storage
+```
+
+3. Появится запрос разрешения на доступ к файлам — нажми **Разрешить**
+
+---
+
+## Скачать / обновить проект
+
+Выполни в Termux одной командой:
+
 ```bash
 cd ~/storage/downloads && rm -rf proekt mmo-rpg-main proekt.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/refs/heads/main.zip -o proekt.zip && unzip proekt.zip && mv mmo-rpg-main proekt && rm proekt.zip && echo "✓ Готово!"
 ```
 
-Запустить сервер:
+---
+
+## Запустить сервер
+
 ```bash
 cd ~/storage/downloads/proekt/server && bash start.sh
 ```
 
-## Первая установка (если ещё не настроен Termux)
+После запуска в консоли появятся адреса для подключения.
+
+- **На этом телефоне:** `http://localhost:7777`
+- **Другие устройства (Wi-Fi):** адрес появится в консоли автоматически
+- Останови сервер: **Ctrl+C**
+
+---
+
+## Настройка администратора
+
+1. Открой файл `~/storage/downloads/proekt/server/admins.txt`
+2. Добавь свой ник (один на строку), сохрани
+3. Перезапусти сервер
+4. Войди в игру → открой профиль 👑 → увидишь панель администратора
+
+---
+
+## Откат на предыдущую версию
+
+Если обновление сломало что-то — скачай конкретную версию по её коду (SHA):
+
 ```bash
-pkg install nodejs curl unzip -y && termux-setup-storage
+# Замени SHA на нужный из таблицы ниже
+SHA=20ac8133f8e865a27314ec7609ed8cefef2e1109
+cd ~/storage/downloads && rm -rf proekt mmo-rpg-main proekt.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/${SHA}.zip -o proekt.zip && unzip proekt.zip && mv mmo-rpg-${SHA:0:7}* proekt && rm proekt.zip && echo "✓ Откат выполнен!"
 ```
 
-## Адреса
-- Этот телефон: `http://localhost:7777`
-- Другие устройства в Wi-Fi: смотри в консоли при старте
-- Внешний IP: нужен проброс порта 7777
+### Таблица версий
+
+| Версия | SHA | Что изменилось |
+|--------|-----|----------------|
+| **v1** | `20ac813` | Первая стабильная версия: технологии, система администратора, картинки в файлах |
+
+> Когда выходит новая стабильная версия — SHA добавляется сюда.
+
+---
+
+## Сброс прогресса игры
+
+```bash
+rm ~/storage/downloads/proekt/server/state.json
+```
+
+---
 
 ## Структура проекта
+
 ```
 server/
   server.js      — HTTP + WebSocket сервер
-  game.js        — игровая логика
+  game.js        — игровая логика (расы, здания, юниты, бой)
   ws.js          — WebSocket протокол
   start.sh       — скрипт запуска
-  admins.txt     — список администраторов (один ник на строку)
+  admins.txt     — список администраторов
   public/
-    index.html   — клиент игры
+    index.html   — клиент игры (браузер)
     build/       — картинки зданий
     units/       — картинки юнитов
     smallunits/  — миниатюры юнитов
-    res/          — иконки ресурсов
+    res/         — иконки ресурсов
     ground/      — текстуры карты
-```
-
-## Администратор
-Открой `server/admins.txt`, добавь свой ник (один на строку), перезапусти сервер.
-Панель администратора появится в профиле игрока (👑).
-
-## Сброс прогресса
-```bash
-rm ~/storage/downloads/proekt/server/state.json
+    border/      — элементы рамок UI
 ```
