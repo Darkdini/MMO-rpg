@@ -20,7 +20,7 @@ pkg update -y && pkg install nodejs curl unzip -y && termux-setup-storage
 Выполни в Termux одной командой:
 
 ```bash
-cd ~/storage/downloads && rm -rf proekt mmo-rpg-main proekt.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/refs/heads/main.zip -o proekt.zip && unzip proekt.zip && mv mmo-rpg-main proekt && rm proekt.zip && echo "✓ Готово!"
+cd ~/storage/downloads && rm -rf proekt MMO-rpg-main MMO-rpg-main.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/refs/heads/main.zip -o MMO-rpg-main.zip && unzip MMO-rpg-main.zip && mv MMO-rpg-main proekt && rm MMO-rpg-main.zip && echo "✓ Готово!"
 ```
 
 ---
@@ -55,7 +55,7 @@ cd ~/storage/downloads/proekt/server && bash start.sh
 ```bash
 # Замени SHA на нужный из таблицы ниже
 SHA=20ac8133f8e865a27314ec7609ed8cefef2e1109
-cd ~/storage/downloads && rm -rf proekt mmo-rpg-main proekt.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/${SHA}.zip -o proekt.zip && unzip proekt.zip && mv mmo-rpg-${SHA:0:7}* proekt && rm proekt.zip && echo "✓ Откат выполнен!"
+cd ~/storage/downloads && rm -rf proekt MMO-rpg-main MMO-rpg-${SHA}.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/${SHA}.zip -o MMO-rpg-${SHA}.zip && unzip MMO-rpg-${SHA}.zip && mv MMO-rpg-${SHA:0:7}* proekt && rm MMO-rpg-${SHA}.zip && echo "✓ Откат выполнен!"
 ```
 
 ### Таблица версий
