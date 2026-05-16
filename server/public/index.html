@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>СРЕДНЕВЕКОВЬЕ</title>
-<script src="/sprites.js"></script>
 <style>
 :root{
   --gold:#d4a236;--gold2:#f0c958;--gold3:#8a6020;
@@ -527,7 +526,7 @@ const BASE_TIMES = {
 // ── УТИЛИТЫ ────────────────────────────────────────────
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
-const spr=k=>SPRITES&&SPRITES[k];
+const spr=k=>k||null;
 function fmtN(n){n=Math.floor(n);return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e4?(n/1e3).toFixed(0)+'k':String(n);}
 function fmtT(s){s=Math.max(0,Math.ceil(s));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return h?h+'ч '+m+'м':m?m+'м '+sec+'с':sec+'с';}
 function clk(){return new Date().toTimeString().slice(0,8);}
@@ -563,9 +562,9 @@ function toast(msg,kind=''){
 // ── СПРАЙТЫ ────────────────────────────────────────────
 const IC={};
 function gi(k){
-  if(!SPRITES||!SPRITES[k])return null;
+  if(!k)return null;
   if(IC[k])return IC[k];
-  const img=new Image();img.src=SPRITES[k];IC[k]=img;return img;
+  const img=new Image();img.src='/'+k;IC[k]=img;return img;
 }
 function preload(){
   const keys=['ground/grass.png','ground/ground.png','ground/stone1.png',
