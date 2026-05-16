@@ -10,14 +10,30 @@ const WS     = require('./ws');
 const G      = require('./game');
 
 const PORT       = parseInt(process.env.PORT || '7777', 10);
-const STATE_FILE = path.join(__dirname, 'state.json');
+const STATE_FILE = process.env.STATE_PATH || path.join(__dirname, 'state.json');
 const PUBLIC     = path.join(__dirname, 'public');
+
+// ── АДМИНИСТРАТОРЫ ───────────────────────────────────────────────────
+const ADMINS = new Set();
+try {
+  const adminFile = path.join(__dirname, 'admins.txt');
+  if (fs.existsSync(adminFile)) {
+    fs.readFileSync(adminFile, 'utf8').split('\n')
+      .map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+      .forEach(u => ADMINS.add(u));
+  }
+} catch {}
+(process.env.ADMIN_USERS || '').split(',').filter(Boolean).forEach(u => ADMINS.add(u.trim()));
 
 // ── СОСТОЯНИЕ ───────────────────────────────────────────────────────
 let STATE = { players:{}, world:null, sessions:{}, chat:[] };
 
 function loadState() {
   try {
+    if (fs.existsSync(STATE_FILE)) {
+      fs.copyFileSync(STATE_FILE, STATE_FILE + '.backup');
+      console.log('[load] Резервная копия сохранена → state.json.backup');
+    }
     STATE = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
     if (!STATE.world) { STATE.world=G.createWorldGrid(); G.initProvince(STATE.world); }
     if (!STATE.chat)  STATE.chat=[];
@@ -93,6 +109,7 @@ function serializePlayer(p) {
     avatar:     p.avatar  || null,
     avatarBg:   p.avatarBg || null,
     photo:      p.photo   || null,
+    isAdmin:    ADMINS.has(p.username),
   };
 }
 
@@ -293,6 +310,20 @@ async function router(req, res) {
     return send(res, 200, { messages: STATE.chat.slice(-100) });
   }
 
+  // ── Админ-команды ────────────────────────────────────────────────
+  if (pathname.startsWith('/api/admin/') && req.method === 'POST') {
+    if (!ADMINS.has(p.username)) return send(res, 403, { error: 'Нет прав администратора' });
+    const action = pathname.slice('/api/admin/'.length);
+    let result;
+    if      (action === 'fill')          result = G.cmdAdminFill(p);
+    else if (action === 'complete')      { result = G.cmdAdminComplete(p); G.tickPlayer(p, STATE.world); }
+    else if (action === 'max-buildings') result = G.cmdAdminMaxBuildings(p);
+    else return send(res, 404, { error: 'Unknown admin action' });
+    if (!result.ok) return send(res, 400, { error: result.error });
+    saveState();
+    return send(res, 200, result);
+  }
+
   return send(res, 404, { error: 'Not found' });
 }
 
@@ -371,6 +402,8 @@ setInterval(() => {
 
 // ── ЗАПУСК ───────────────────────────────────────────────────────────
 loadState();
+if (ADMINS.size) console.log(`[admin] Администраторы: ${[...ADMINS].join(', ')}`);
+else console.log('[admin] admins.txt не найден — без администраторов');
 
 server.listen(PORT, '0.0.0.0', () => {
   const nets = os.networkInterfaces();

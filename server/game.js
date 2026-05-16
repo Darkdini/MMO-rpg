@@ -459,6 +459,28 @@ function respawnBandits(world) {
   }
 }
 
+// ─── ADMIN-КОМАНДЫ ──────────────────────────────────────────────────
+function cmdAdminFill(p) {
+  for (const k of RES) { p.res[k] = 999999; p.resMax[k] = 999999; }
+  for (const tid of Object.keys(TECHS)) p.techs[tid] = true;
+  return ok();
+}
+
+function cmdAdminComplete(p) {
+  const now = Date.now() - 1;
+  for (const j of p.queue)      j.end = now;
+  for (const j of p.trainQueue) { j.nextDone = now; j.count = 0; }
+  return ok();
+}
+
+function cmdAdminMaxBuildings(p) {
+  for (const c of [...(p.castle||[]), ...(p.lands||[])]) {
+    if (c.bldId && c.level > 0) c.level = Math.min(10, c.level + 5);
+  }
+  recomputeMaxes(p);
+  return ok();
+}
+
 module.exports = {
   RACES, RES, RES_LABEL, RES_IMG,
   BUILDINGS, LAND_BUILDINGS, UNITS, TECHS,
@@ -469,6 +491,7 @@ module.exports = {
   createPlayer, createWorldGrid, initProvince, placePlayerOnWorld,
   tickPlayer, recomputeMaxes, computeRates,
   cmdBuild, cmdDemolish, cmdTrain, cmdAttack, cmdResearch, respawnBandits,
+  cmdAdminFill, cmdAdminComplete, cmdAdminMaxBuildings,
   nextBuildCost, nextBuildTime, getCastleLevel, reqMet, hasUnique,
   gridDist, strHash,
 };

@@ -1459,6 +1459,7 @@ function showProfileModal(){
         <div style="font-size:12px;color:#a89070;">@${p.username}</div>
         <div style="font-size:13px;color:#e0d0b0;margin-top:4px;">${RACES[p.race]?.name} ${RACE_G[p.race]||''}</div>
         <div style="margin-top:6px;font-size:14px;font-weight:bold;color:${rankColor};">${rankTitle}</div>
+        ${p.isAdmin?`<div style="margin-top:5px;display:inline-block;background:rgba(60,0,0,.7);border:1px solid #c03030;border-radius:4px;padding:2px 10px;font-size:11px;color:#ff9090;font-weight:bold;letter-spacing:1px;">⚙ АДМИНИСТРАТОР</div>`:''}
       </div>
     </div>
 
@@ -1516,7 +1517,22 @@ function showProfileModal(){
         </label>
         ${p.photo?'<button id="remove-photo" class="mbtn red" style="padding:5px 10px;font-size:11px;min-width:auto;">Удалить</button>':''}
       </div>
-    </div>`;
+    </div>
+    ${p.isAdmin?`
+    <div style="margin-top:14px;border-top:1px solid #501010;padding-top:12px;">
+      <div style="font-size:11px;color:#c05050;font-weight:bold;letter-spacing:1px;margin-bottom:8px;">⚙ ИНСТРУМЕНТЫ АДМИНИСТРАТОРА</div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button data-admin="fill" style="padding:10px 14px;background:linear-gradient(180deg,#5a1a1a,#2a0808);border:1px solid #903030;border-radius:6px;color:#faa;font-size:12px;font-weight:bold;cursor:pointer;text-align:left;">
+          💰 Максимальные ресурсы + все технологии
+        </button>
+        <button data-admin="complete" style="padding:10px 14px;background:linear-gradient(180deg,#5a1a1a,#2a0808);border:1px solid #903030;border-radius:6px;color:#faa;font-size:12px;font-weight:bold;cursor:pointer;text-align:left;">
+          ⚡ Завершить все очереди строительства и обучения
+        </button>
+        <button data-admin="max-buildings" style="padding:10px 14px;background:linear-gradient(180deg,#5a1a1a,#2a0808);border:1px solid #903030;border-radius:6px;color:#faa;font-size:12px;font-weight:bold;cursor:pointer;text-align:left;">
+          🏗 +5 уровней всем построенным зданиям
+        </button>
+      </div>
+    </div>`:''}`;
 
   const actions=[
     {label:'🏆 Рейтинг',kind:'gold',handler:()=>{showRatingModal();},close:true},
@@ -1528,6 +1544,24 @@ function showProfileModal(){
   ];
 
   const bg=modal({title:'👑 Профиль',body:con,actions});
+
+  // Логика админ-кнопок
+  if(p.isAdmin){
+    con.querySelectorAll('[data-admin]').forEach(btn=>{
+      btn.onmouseenter=()=>btn.style.borderColor='#d05050';
+      btn.onmouseleave=()=>btn.style.borderColor='#903030';
+      btn.onclick=async()=>{
+        const action=btn.dataset.admin;
+        btn.disabled=true;btn.style.opacity='.5';
+        try{
+          await api('/api/admin/'+action,{method:'POST',body:{}});
+          await refreshState();renderTopbar();renderMap();
+          toast('✓ Выполнено','ok');
+        }catch(e){toast(e.message,'err');}
+        btn.disabled=false;btn.style.opacity='1';
+      };
+    });
+  }
 
   // Логика аватар-редактора
   let curAv=avatar,curBg=avatarBg;
