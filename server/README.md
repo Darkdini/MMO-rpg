@@ -20,7 +20,7 @@ pkg update -y && pkg install nodejs curl unzip -y && termux-setup-storage
 Выполни в Termux одной командой:
 
 ```bash
-cd ~/storage/downloads && rm -rf proekt MMO-rpg-main MMO-rpg-main.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/refs/heads/main.zip -o MMO-rpg-main.zip && unzip MMO-rpg-main.zip && mv MMO-rpg-main proekt && rm MMO-rpg-main.zip && echo "✓ Готово!"
+cd ~ && rm -rf proekt MMO-rpg-main MMO-rpg-main.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/refs/heads/main.zip -o MMO-rpg-main.zip && unzip MMO-rpg-main.zip && mv MMO-rpg-main proekt && rm MMO-rpg-main.zip && echo "✓ Готово!"
 ```
 
 ---
@@ -28,7 +28,7 @@ cd ~/storage/downloads && rm -rf proekt MMO-rpg-main MMO-rpg-main.zip && curl -L
 ## Запустить сервер
 
 ```bash
-cd ~/storage/downloads/proekt/server && bash start.sh
+cd ~/proekt/server && bash start.sh
 ```
 
 После запуска в консоли появятся адреса для подключения.
@@ -41,7 +41,7 @@ cd ~/storage/downloads/proekt/server && bash start.sh
 
 ## Настройка администратора
 
-1. Открой файл `~/storage/downloads/proekt/server/admins.txt`
+1. Открой файл `~/proekt/server/admins.txt`
 2. Добавь свой ник (один на строку), сохрани
 3. Перезапусти сервер
 4. Войди в игру → открой профиль 👑 → увидишь панель администратора
@@ -55,7 +55,7 @@ cd ~/storage/downloads/proekt/server && bash start.sh
 ```bash
 # Замени SHA на нужный из таблицы ниже
 SHA=20ac8133f8e865a27314ec7609ed8cefef2e1109
-cd ~/storage/downloads && rm -rf proekt MMO-rpg-main MMO-rpg-${SHA}.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/${SHA}.zip -o MMO-rpg-${SHA}.zip && unzip MMO-rpg-${SHA}.zip && mv MMO-rpg-${SHA:0:7}* proekt && rm MMO-rpg-${SHA}.zip && echo "✓ Откат выполнен!"
+cd ~ && rm -rf proekt MMO-rpg-main MMO-rpg-${SHA}.zip && curl -L https://github.com/darkdini/mmo-rpg/archive/${SHA}.zip -o MMO-rpg-${SHA}.zip && unzip MMO-rpg-${SHA}.zip && mv MMO-rpg-${SHA:0:7}* proekt && rm MMO-rpg-${SHA}.zip && echo "✓ Откат выполнен!"
 ```
 
 ### Таблица версий
@@ -71,7 +71,7 @@ cd ~/storage/downloads && rm -rf proekt MMO-rpg-main MMO-rpg-${SHA}.zip && curl 
 ## Сброс прогресса игры
 
 ```bash
-rm ~/storage/downloads/proekt/server/state.json
+rm ~/proekt/server/state.json
 ```
 
 ---
