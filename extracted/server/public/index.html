@@ -539,7 +539,7 @@ function calcTime(id,lv,clvl){return Math.max(5,Math.round((BASE_TIMES[id]||60)*
 function canAfford(c){for(const k in c)if((S.player.res[k]||0)<c[k])return false;return true;}
 function getCLvl(){const c=(S.player.castle||[]).find(x=>x.bldId==='castle');return c?c.level:1;}
 function reqOk(id,cells){
-  const def=BUILDINGS[id]||LAND_BUILDINGS[id];if(!def?.req)return true;
+  const def=BUILDINGS[id]||LAND_BUILDINGS[id]||TECHS[id];if(!def?.req)return true;
   for(const k in def.req){
     let l=0;
     for(const c of (cells||S.player.castle))if(c.bldId===k)l=Math.max(l,c.level);

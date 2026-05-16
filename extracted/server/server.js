@@ -68,8 +68,9 @@ function getPlayer(req) {
   return STATE.players[username] || null;
 }
 
-function hashPw(pw)  { return crypto.createHash('sha256').update(pw + ':srv_salt_2024').digest('hex'); }
-function newSid()    { return crypto.randomBytes(20).toString('hex'); }
+function hashPw(pw, salt) { return crypto.createHash('sha256').update(pw + ':' + (salt||'srv_salt_2024')).digest('hex'); }
+function newSid()  { return crypto.randomBytes(20).toString('hex'); }
+function newSalt() { return crypto.randomBytes(16).toString('hex'); }
 
 // ── СЕРИАЛИЗАЦИЯ ИГРОКА ─────────────────────────────────────────────
 function serializePlayer(p) {
@@ -97,6 +98,19 @@ function serializePlayer(p) {
 
 // ── WEBSOCKET ───────────────────────────────────────────────────────
 const wsClients = new Map(); // username -> WSClient
+
+// ── ЗАЩИТА ОТ БРУТФОРСА ─────────────────────────────────────────────
+const loginAttempts = new Map(); // ip -> { count, resetAt }
+function checkRateLimit(ip, max=15, windowMs=60000) {
+  const now = Date.now();
+  let e = loginAttempts.get(ip);
+  if (!e || now > e.resetAt) { e = { count:0, resetAt:now+windowMs }; loginAttempts.set(ip, e); }
+  return ++e.count > max;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of loginAttempts) if (now > v.resetAt) loginAttempts.delete(k);
+}, 60000);
 
 function push(username, msg) {
   wsClients.get(username)?.send(JSON.stringify(msg));
@@ -126,6 +140,7 @@ async function router(req, res) {
 
   // ── Регистрация ──────────────────────────────────────────────────
   if (pathname === '/api/register' && req.method === 'POST') {
+    if (checkRateLimit(req.socket.remoteAddress, 5)) return send(res, 429, { error: 'Слишком много попыток. Подождите минуту.' });
     const { username, password, race, kingdom } = await readBody(req);
     if (!username || username.length < 3)  return send(res, 400, { error: 'Логин минимум 3 символа' });
     if (!password || password.length < 4)  return send(res, 400, { error: 'Пароль минимум 4 символа' });
@@ -134,7 +149,9 @@ async function router(req, res) {
     if (STATE.players[username])           return send(res, 400, { error: 'Имя занято' });
     const player = G.createPlayer(race, kingdom);
     player.username = username;
-    player.passwordHash = hashPw(password);
+    const salt = newSalt();
+    player.passwordSalt = salt;
+    player.passwordHash = hashPw(password, salt);
     player.worldPos = G.placePlayerOnWorld(STATE.world, username, race);
     STATE.players[username] = player;
     const sid = newSid();
@@ -145,9 +162,10 @@ async function router(req, res) {
 
   // ── Логин ────────────────────────────────────────────────────────
   if (pathname === '/api/login' && req.method === 'POST') {
+    if (checkRateLimit(req.socket.remoteAddress)) return send(res, 429, { error: 'Слишком много попыток. Подождите минуту.' });
     const { username, password } = await readBody(req);
     const player = STATE.players[username];
-    if (!player || player.passwordHash !== hashPw(password)) return send(res, 401, { error: 'Неверный логин или пароль' });
+    if (!player || player.passwordHash !== hashPw(password, player.passwordSalt)) return send(res, 401, { error: 'Неверный логин или пароль' });
     const sid = newSid();
     STATE.sessions[sid] = username;
     saveState();
@@ -232,11 +250,10 @@ async function router(req, res) {
   // ── Исследование технологий ──────────────────────────────────────
   if (pathname === '/api/research' && req.method === 'POST') {
     const { tid } = await readBody(req);
-    if (!p.techs) p.techs = {};
-    if (p.techs[tid]) return send(res, 400, { error: 'Уже изучено' });
-    p.techs[tid] = true;
+    const result = G.cmdResearch(p, { tid });
+    if (!result.ok) return send(res, 400, { error: result.error });
     saveState();
-    return send(res, 200, { ok:true });
+    return send(res, 200, result);
   }
 
   // ── Аватар ───────────────────────────────────────────────────────
@@ -307,7 +324,7 @@ server.on('upgrade', (req, socket) => {
     wsClients.set(username, client);
   }
 
-  client.onMsg = raw => {
+  client.onMessage = raw => {
     try {
       const m = JSON.parse(raw);
       if (m.type === 'ping') {
@@ -346,6 +363,11 @@ setInterval(() => {
 }, 1000);
 
 setInterval(() => saveState(), 15000);
+
+// ── ВОЗРОЖДЕНИЕ БАНДИТОВ ─────────────────────────────────────────────
+setInterval(() => {
+  G.respawnBandits(STATE.world);
+}, 5 * 60 * 1000);
 
 // ── ЗАПУСК ───────────────────────────────────────────────────────────
 loadState();

@@ -81,6 +81,20 @@ const UNITS = {
   dwarv_general:   { name:'Генерал',   race:'dwarv',img:'units/dwarv/general.png',   simg:'smallunits/dwarv/general.png',   atk:160,def:130,hp:210,speed:13,carry:160,upkeep:10,building:'university',trainTime:620,reqLvl:5,cost:{wood:200,iron:350,food:200},people:1 },
 };
 
+// ─── ТЕХНОЛОГИИ ─────────────────────────────────────────────────────
+const TECHS = {
+  iron_working: { name:'Обработка железа', cat:'mil',  req:{ smithy:2 },      cost:{ gold:500,  wood:200,  iron:300         }, effect:'Урон войск +10%'              },
+  horse_breed:  { name:'Коневодство',      cat:'mil',  req:{ stables:2 },     cost:{ gold:400,  food:300,  iron:100         }, effect:'Скорость конницы +20%'        },
+  siege_eng:    { name:'Осадное дело',     cat:'mil',  req:{ workshop:3 },    cost:{ gold:800,  wood:500,  iron:400         }, effect:'Открывает осадные орудия'     },
+  alchemy:      { name:'Алхимия',          cat:'sci',  req:{ alchimia:2 },    cost:{ gold:600,  stone:300, iron:200         }, effect:'Производство всех ресурсов +15%'},
+  magic_shield: { name:'Магический щит',   cat:'sci',  req:{ magscool:2 },    cost:{ gold:700,  stone:400               }, effect:'Потери в бою -20%'            },
+  trade_routes: { name:'Торговые пути',    cat:'econ', req:{ market:2 },      cost:{ gold:300,  wood:200                }, effect:'Базовое золото +50/ч'         },
+  agriculture:  { name:'Агрикультура',     cat:'econ', req:{               }, cost:{ gold:400,  food:500                }, effect:'Производство еды +20%'        },
+  architecture: { name:'Архитектура',      cat:'inf',  req:{ castle:4 },      cost:{ gold:500,  stone:400, wood:300     }, effect:'Время строительства -20%'     },
+  cartography:  { name:'Картография',      cat:'dip',  req:{ expedition:1 },  cost:{ gold:400,  wood:100                }, effect:'Радар мира +5'                },
+  espionage:    { name:'Шпионаж',          cat:'dip',  req:{ resident:2 },    cost:{ gold:600,  iron:200               }, effect:'Разведка +50%'                },
+};
+
 // ─── РЕЙТИНГ ────────────────────────────────────────────────────────
 const RATING_WEIGHTS = {
   castle:10, barracks:6, stables:6, smithy:5, university:8,
@@ -199,12 +213,16 @@ function placePlayerOnWorld(world, username, race) {
 }
 
 // ─── БАЛАНС ─────────────────────────────────────────────────────────
-function buildingProduction(bldId, level, race) {
+function buildingProduction(bldId, level, race, techs) {
   const b = LAND_BUILDINGS[bldId]; if (!b || !b.produces) return 0;
   let p = b.basePerHour * Math.pow(1.3, level-1);
   if (race==='human' && b.produces==='iron')  p *= 1.2;
   if (race==='elf'   && b.produces==='wood')  p *= 1.2;
   if (race==='dwarv' && b.produces==='stone') p *= 1.2;
+  if (techs) {
+    if (techs.agriculture && b.produces==='food') p *= 1.2;
+    if (techs.alchemy)                            p *= 1.15;
+  }
   return Math.round(p);
 }
 
@@ -214,9 +232,10 @@ function nextBuildCost(bldId, lv) {
   return { wood:Math.round((def.cost.wood||0)*m), stone:Math.round((def.cost.stone||0)*m), iron:Math.round((def.cost.iron||0)*m), food:Math.round((def.cost.food||0)*m) };
 }
 
-function nextBuildTime(bldId, lv, clvl=1) {
+function nextBuildTime(bldId, lv, clvl=1, techs={}) {
   const def = BUILDINGS[bldId] || LAND_BUILDINGS[bldId]; if (!def) return 60;
-  return Math.max(5, Math.round(def.time * Math.pow(1.4,lv) * Math.pow(0.92,clvl-1)));
+  const t = Math.max(5, Math.round(def.time * Math.pow(1.4,lv) * Math.pow(0.92,clvl-1)));
+  return techs.architecture ? Math.max(5, Math.round(t * 0.8)) : t;
 }
 
 function getCastleLevel(p) { const c=(p.castle||[]).find(x=>x.bldId==='castle'); return c?c.level:1; }
@@ -235,11 +254,13 @@ function canAfford(p, cost)  { for (const k in cost) if ((p.res[k]||0)<cost[k]) 
 function payCost(p, cost)    { for (const k in cost) p.res[k] -= cost[k]; }
 
 function computeRates(p) {
+  const techs = p.techs || {};
   const r = { gold:50, wood:0, stone:0, food:0, iron:0, people:0 };
+  if (techs.trade_routes) r.gold += 50;
   for (const c of p.lands) {
     if (!c.bldId) continue;
     const def = LAND_BUILDINGS[c.bldId]; if (!def?.produces) continue;
-    r[def.produces] += buildingProduction(c.bldId, c.level, p.race);
+    r[def.produces] += buildingProduction(c.bldId, c.level, p.race, techs);
   }
   for (const uid in p.army) {
     const n=p.army[uid]; if (!n) continue;
@@ -265,8 +286,11 @@ function addReport(p, txt, kind='info') {
 
 // ─── БОЙ ────────────────────────────────────────────────────────────
 function resolveBattle(p, world, march) {
+  const techs = p.techs || {};
+  const atkMult = 1 + (techs.iron_working ? 0.10 : 0);
   let atkPow = 0;
   for (const uid in march.units) atkPow += (march.units[uid]||0) * (UNITS[uid]?.atk||0);
+  atkPow = Math.round(atkPow * atkMult);
   const cell = world.find(c=>c.col===march.target.col&&c.row===march.target.row);
   if (!cell) return { win:false, survivors:{}, losses:march.units, lossesTxt:'цель не найдена', loot:null };
   let defPow=0, lootMult=1;
@@ -274,7 +298,8 @@ function resolveBattle(p, world, march) {
   else if (cell.type==='oasis')  defPow = 30;
   else if (cell.type==='player') { defPow=(cell.lvl||1)*200; lootMult=0.3; }
   const win = atkPow > defPow * 0.9;
-  const lr = win ? Math.min(0.6,defPow/Math.max(1,atkPow)*0.5) : Math.min(0.95,defPow/Math.max(1,atkPow)*0.8);
+  const baseLr = win ? Math.min(0.6,defPow/Math.max(1,atkPow)*0.5) : Math.min(0.95,defPow/Math.max(1,atkPow)*0.8);
+  const lr = techs.magic_shield ? baseLr * 0.80 : baseLr;
   const survivors={}, losses={};
   for (const uid in march.units) {
     const start=march.units[uid], lost=Math.min(start,Math.round(start*lr)), surv=start-lost;
@@ -345,7 +370,7 @@ function cmdBuild(p, { loc, col, row, bldId }) {
   if (p.queue.filter(j=>j.loc===loc).length>=2) return err('queue full');
   const cost=nextBuildCost(bldId,curLvl); if (!canAfford(p,cost)) return err('not enough resources');
   payCost(p,cost);
-  const t=Date.now(), time=nextBuildTime(bldId,curLvl,getCastleLevel(p));
+  const t=Date.now(), time=nextBuildTime(bldId,curLvl,getCastleLevel(p),p.techs||{});
   p.queue.push({ loc, col, row, bldId, toLvl:curLvl+1, start:t, end:t+time*1000 });
   return ok({ time });
 }
@@ -401,16 +426,49 @@ function cmdAttack(p, world, { targetCol, targetRow, units }) {
 const ok  = (e={}) => ({ ok:true,  ...e });
 const err = (m)    => ({ ok:false, error:m });
 
+// ─── ИССЛЕДОВАНИЕ ТЕХНОЛОГИЙ ────────────────────────────────────────
+function cmdResearch(p, { tid }) {
+  const tech = TECHS[tid];
+  if (!tech) return err('Неизвестная технология');
+  if (!p.techs) p.techs = {};
+  if (p.techs[tid]) return err('Уже изучено');
+  for (const [bldId, minLvl] of Object.entries(tech.req || {})) {
+    const allCells = [...(p.castle||[]), ...(p.lands||[])];
+    if (!allCells.some(c => c.bldId === bldId && c.level >= minLvl)) {
+      const bldName = (BUILDINGS[bldId] || LAND_BUILDINGS[bldId])?.name || bldId;
+      return err(`Требуется: ${bldName} ур.${minLvl}`);
+    }
+  }
+  if (!canAfford(p, tech.cost)) return err('Недостаточно ресурсов');
+  payCost(p, tech.cost);
+  p.techs[tid] = true;
+  return ok({ name: tech.name });
+}
+
+// ─── ВОЗРОЖДЕНИЕ БАНДИТОВ ────────────────────────────────────────────
+function respawnBandits(world) {
+  const bandits = world.filter(c => c.type === 'bandit').length;
+  if (bandits >= 20) return;
+  const empty = world.filter(c => c.type === 'empty');
+  const toSpawn = Math.min(5, 20 - bandits, empty.length);
+  for (let i = 0; i < toSpawn; i++) {
+    const idx = Math.floor(Math.random() * empty.length);
+    const cell = empty.splice(idx, 1)[0];
+    cell.type = 'bandit';
+    cell.power = 50 + Math.floor(Math.random() * 300);
+  }
+}
+
 module.exports = {
   RACES, RES, RES_LABEL, RES_IMG,
-  BUILDINGS, LAND_BUILDINGS, UNITS,
+  BUILDINGS, LAND_BUILDINGS, UNITS, TECHS,
   RATING_WEIGHTS, calcRating, ratingDelta,
   CASTLE_COLS, CASTLE_ROWS, LANDS_COLS, LANDS_ROWS, WORLD_COLS, WORLD_ROWS,
   MAX_PLAYERS_PER_PROVINCE, OASES_PER_PROVINCE,
   isCastleWall, isLandsWall,
   createPlayer, createWorldGrid, initProvince, placePlayerOnWorld,
   tickPlayer, recomputeMaxes, computeRates,
-  cmdBuild, cmdDemolish, cmdTrain, cmdAttack,
+  cmdBuild, cmdDemolish, cmdTrain, cmdAttack, cmdResearch, respawnBandits,
   nextBuildCost, nextBuildTime, getCastleLevel, reqMet, hasUnique,
   gridDist, strHash,
 };
