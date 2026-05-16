@@ -1,0 +1,376 @@
+'use strict';
+// server.js — СРЕДНЕВЕКОВЬЕ. HTTP + WebSocket + игровой цикл.
+
+const http   = require('http');
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
+const os     = require('os');
+const WS     = require('./ws');
+const G      = require('./game');
+
+const PORT       = parseInt(process.env.PORT || '7777', 10);
+const STATE_FILE = path.join(__dirname, 'state.json');
+const PUBLIC     = path.join(__dirname, 'public');
+
+// ── СОСТОЯНИЕ ───────────────────────────────────────────────────────
+let STATE = { players:{}, world:null, sessions:{}, chat:[] };
+
+function loadState() {
+  try {
+    STATE = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (!STATE.world) { STATE.world=G.createWorldGrid(); G.initProvince(STATE.world); }
+    if (!STATE.chat)  STATE.chat=[];
+    console.log(`[load] ${Object.keys(STATE.players).length} игроков`);
+  } catch {
+    console.log('[load] Новая игра');
+    STATE.world = G.createWorldGrid();
+    G.initProvince(STATE.world);
+  }
+}
+
+let _saveTimer = null;
+function saveState() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try { fs.writeFileSync(STATE_FILE, JSON.stringify(STATE)); } catch(e) { console.error('[save]', e.message); }
+  }, 500);
+}
+
+// ── HTTP УТИЛИТЫ ────────────────────────────────────────────────────
+const MIME = { '.html':'text/html', '.js':'application/javascript', '.css':'text/css', '.json':'application/json', '.png':'image/png', '.ico':'image/x-icon' };
+
+function send(res, status, data, extra={}) {
+  const isJson = typeof data === 'object' && !(data instanceof Buffer);
+  res.writeHead(status, { 'Content-Type': isJson ? 'application/json;charset=utf-8' : 'text/html;charset=utf-8', ...extra });
+  res.end(isJson ? JSON.stringify(data) : data);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 2e6) { req.destroy(); reject(new Error('too large')); } });
+    req.on('end',  () => { try { resolve(body ? JSON.parse(body) : {}); } catch (e) { reject(e); } });
+    req.on('error', reject);
+  });
+}
+
+function getCookie(req, name) {
+  const m = (req.headers.cookie||'').match(new RegExp(`(?:^|; )${name}=([^;]+)`));
+  return m ? m[1] : null;
+}
+
+function getPlayer(req) {
+  const sid = getCookie(req, 'sid');
+  if (!sid) return null;
+  const username = STATE.sessions[sid];
+  if (!username) return null;
+  return STATE.players[username] || null;
+}
+
+function hashPw(pw)  { return crypto.createHash('sha256').update(pw + ':srv_salt_2024').digest('hex'); }
+function newSid()    { return crypto.randomBytes(20).toString('hex'); }
+
+// ── СЕРИАЛИЗАЦИЯ ИГРОКА ─────────────────────────────────────────────
+function serializePlayer(p) {
+  return {
+    username:   p.username,
+    kingdom:    p.kingdom,
+    race:       p.race,
+    res:        p.res,
+    resMax:     p.resMax,
+    castle:     p.castle,
+    lands:      p.lands,
+    queue:      p.queue,
+    trainQueue: p.trainQueue,
+    army:       p.army,
+    marches:    p.marches,
+    reports:    p.reports,
+    worldPos:   p.worldPos,
+    techs:      p.techs || {},
+    rating:     G.calcRating(p),
+    avatar:     p.avatar  || null,
+    avatarBg:   p.avatarBg || null,
+    photo:      p.photo   || null,
+  };
+}
+
+// ── WEBSOCKET ───────────────────────────────────────────────────────
+const wsClients = new Map(); // username -> WSClient
+
+function push(username, msg) {
+  wsClients.get(username)?.send(JSON.stringify(msg));
+}
+function broadcast(msg) {
+  const s = JSON.stringify(msg);
+  for (const c of wsClients.values()) try { c.send(s); } catch {}
+}
+
+// ── HTTP МАРШРУТИЗАЦИЯ ──────────────────────────────────────────────
+async function router(req, res) {
+  const u = new URL(req.url, 'http://x');
+  const pathname = u.pathname;
+
+  // ── Статика ──────────────────────────────────────────────────────
+  if (!pathname.startsWith('/api/')) {
+    const filePath = pathname === '/'
+      ? path.join(PUBLIC, 'index.html')
+      : path.join(PUBLIC, pathname);
+    if (!filePath.startsWith(PUBLIC)) return send(res, 403, 'Forbidden');
+    return fs.readFile(filePath, (err, data) => {
+      if (err) return fs.readFile(path.join(PUBLIC, 'index.html'), (e, d) => { if(e) return send(res,404,'Not found'); res.writeHead(200,{'Content-Type':'text/html'}); res.end(d); });
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream' });
+      res.end(data);
+    });
+  }
+
+  // ── Регистрация ──────────────────────────────────────────────────
+  if (pathname === '/api/register' && req.method === 'POST') {
+    const { username, password, race, kingdom } = await readBody(req);
+    if (!username || username.length < 3)  return send(res, 400, { error: 'Логин минимум 3 символа' });
+    if (!password || password.length < 4)  return send(res, 400, { error: 'Пароль минимум 4 символа' });
+    if (!G.RACES[race])                    return send(res, 400, { error: 'Неверная раса' });
+    if (!kingdom || kingdom.length < 2)    return send(res, 400, { error: 'Название королевства минимум 2 символа' });
+    if (STATE.players[username])           return send(res, 400, { error: 'Имя занято' });
+    const player = G.createPlayer(race, kingdom);
+    player.username = username;
+    player.passwordHash = hashPw(password);
+    player.worldPos = G.placePlayerOnWorld(STATE.world, username, race);
+    STATE.players[username] = player;
+    const sid = newSid();
+    STATE.sessions[sid] = username;
+    saveState();
+    return send(res, 200, { ok:true, username, kingdom }, { 'Set-Cookie': `sid=${sid}; Path=/; HttpOnly; Max-Age=2592000` });
+  }
+
+  // ── Логин ────────────────────────────────────────────────────────
+  if (pathname === '/api/login' && req.method === 'POST') {
+    const { username, password } = await readBody(req);
+    const player = STATE.players[username];
+    if (!player || player.passwordHash !== hashPw(password)) return send(res, 401, { error: 'Неверный логин или пароль' });
+    const sid = newSid();
+    STATE.sessions[sid] = username;
+    saveState();
+    return send(res, 200, { ok:true, username }, { 'Set-Cookie': `sid=${sid}; Path=/; HttpOnly; Max-Age=2592000` });
+  }
+
+  // ── Далее — нужна авторизация ─────────────────────────────────────
+  const p = getPlayer(req);
+
+  if (pathname === '/api/logout' && req.method === 'POST') {
+    const sid = getCookie(req, 'sid');
+    if (sid) delete STATE.sessions[sid];
+    return send(res, 200, { ok:true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0' });
+  }
+
+  if (!p) return send(res, 401, { error: 'Необходима авторизация' });
+
+  // ── Состояние игрока ─────────────────────────────────────────────
+  if (pathname === '/api/state' && req.method === 'GET') {
+    G.tickPlayer(p, STATE.world);
+    return send(res, 200, {
+      player: serializePlayer(p),
+      world:  STATE.world,
+    });
+  }
+
+  // ── Строительство ────────────────────────────────────────────────
+  if (pathname === '/api/build' && req.method === 'POST') {
+    const body = await readBody(req);
+    G.tickPlayer(p, STATE.world);
+    const result = G.cmdBuild(p, body);
+    if (!result.ok) return send(res, 400, { error: result.error });
+    saveState();
+    return send(res, 200, result);
+  }
+
+  // ── Снос ─────────────────────────────────────────────────────────
+  if (pathname === '/api/demolish' && req.method === 'POST') {
+    const body = await readBody(req);
+    G.tickPlayer(p, STATE.world);
+    const result = G.cmdDemolish(p, body);
+    if (!result.ok) return send(res, 400, { error: result.error });
+    saveState();
+    return send(res, 200, result);
+  }
+
+  // ── Тренировка ───────────────────────────────────────────────────
+  if (pathname === '/api/train' && req.method === 'POST') {
+    const body = await readBody(req);
+    G.tickPlayer(p, STATE.world);
+    const result = G.cmdTrain(p, body);
+    if (!result.ok) return send(res, 400, { error: result.error });
+    saveState();
+    return send(res, 200, result);
+  }
+
+  // ── Атака ────────────────────────────────────────────────────────
+  if (pathname === '/api/attack' && req.method === 'POST') {
+    const body = await readBody(req);
+    G.tickPlayer(p, STATE.world);
+    const result = G.cmdAttack(p, STATE.world, body);
+    if (!result.ok) return send(res, 400, { error: result.error });
+    saveState();
+    return send(res, 200, result);
+  }
+
+  // ── Ускорение постройки ──────────────────────────────────────────
+  if (pathname === '/api/speed-build' && req.method === 'POST') {
+    const { jobIndex } = await readBody(req);
+    const job = p.queue[jobIndex];
+    if (!job) return send(res, 400, { error: 'Нет такой работы' });
+    const rem = Math.max(0, Math.ceil((job.end - Date.now()) / 1000));
+    const cost = Math.max(1, Math.ceil(rem / 60) * 2);
+    if ((p.res.gold||0) < cost) return send(res, 400, { error: `Нужно ${cost} золота` });
+    p.res.gold -= cost;
+    job.end = Date.now();
+    G.tickPlayer(p, STATE.world);
+    saveState();
+    return send(res, 200, { ok:true, cost });
+  }
+
+  // ── Исследование технологий ──────────────────────────────────────
+  if (pathname === '/api/research' && req.method === 'POST') {
+    const { tid } = await readBody(req);
+    if (!p.techs) p.techs = {};
+    if (p.techs[tid]) return send(res, 400, { error: 'Уже изучено' });
+    p.techs[tid] = true;
+    saveState();
+    return send(res, 200, { ok:true });
+  }
+
+  // ── Аватар ───────────────────────────────────────────────────────
+  if (pathname === '/api/avatar' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (body.avatar !== undefined) p.avatar   = String(body.avatar||'').slice(0, 8);
+    if (body.bg     !== undefined) p.avatarBg = String(body.bg||'').slice(0, 20);
+    if (body.photo  !== undefined) {
+      if (body.photo === null)     delete p.photo;
+      else if (body.photo.length < 250000) p.photo = body.photo;
+      else return send(res, 400, { error: 'Фото слишком большое' });
+    }
+    saveState();
+    return send(res, 200, { ok:true });
+  }
+
+  // ── Рейтинг ──────────────────────────────────────────────────────
+  if (pathname === '/api/rating' && req.method === 'GET') {
+    const top = Object.values(STATE.players)
+      .map(pl => ({
+        username:  pl.username,
+        kingdom:   pl.kingdom,
+        race:      pl.race,
+        rating:    G.calcRating(pl),
+        armySize:  Object.values(pl.army||{}).reduce((a,b)=>a+(+b||0), 0),
+        castleLvl: (pl.castle||[]).find(c=>c.bldId==='castle')?.level || 1,
+        avatar:    pl.avatar || null,
+        avatarBg:  pl.avatarBg || null,
+      }))
+      .sort((a,b) => b.rating - a.rating)
+      .slice(0, 50);
+    return send(res, 200, { top });
+  }
+
+  // ── История чата ─────────────────────────────────────────────────
+  if (pathname === '/api/chat' && req.method === 'GET') {
+    return send(res, 200, { messages: STATE.chat.slice(-100) });
+  }
+
+  return send(res, 404, { error: 'Not found' });
+}
+
+// ── HTTP СЕРВЕР ─────────────────────────────────────────────────────
+const server = http.createServer(async (req, res) => {
+  try { await router(req, res); }
+  catch (e) { console.error('[http]', e.message); send(res, 500, { error: e.message }); }
+});
+
+// ── WEBSOCKET АПГРЕЙД ───────────────────────────────────────────────
+server.on('upgrade', (req, socket) => {
+  const key = req.headers['sec-websocket-key'];
+  if (!key) return socket.destroy();
+  socket.write([
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    'Sec-WebSocket-Accept: ' + require('crypto').createHash('sha1').update(key+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64'),
+    '', ''
+  ].join('\r\n'));
+
+  const client = new WS.WSClient(socket);
+  let username = null;
+
+  // Авторизуем по cookie
+  const sid = (req.headers.cookie||'').match(/sid=([a-f0-9]+)/)?.[1];
+  if (sid && STATE.sessions[sid]) {
+    username = STATE.sessions[sid];
+    wsClients.set(username, client);
+  }
+
+  client.onMsg = raw => {
+    try {
+      const m = JSON.parse(raw);
+      if (m.type === 'ping') {
+        client.send(JSON.stringify({ type:'pong' }));
+      } else if (m.type === 'chat' && username) {
+        const text = String(m.text||'').trim().slice(0, 200);
+        if (!text) return;
+        const pl = STATE.players[username];
+        const msg = { t:Date.now(), username, race:pl?.race, kingdom:pl?.kingdom, text };
+        STATE.chat.push(msg);
+        if (STATE.chat.length > 200) STATE.chat.shift();
+        broadcast({ type:'chat', msg });
+        saveState();
+      }
+    } catch {}
+  };
+
+  client.onClose = () => {
+    if (username) wsClients.delete(username);
+  };
+});
+
+// ── ИГРОВОЙ ЦИК ────────────────────────────────────────────────────
+setInterval(() => {
+  for (const username of Object.keys(STATE.players)) {
+    const p = STATE.players[username];
+    const repBefore = p.reports.length;
+    G.tickPlayer(p, STATE.world);
+    if (wsClients.has(username)) {
+      push(username, { type:'state', player: serializePlayer(p) });
+      if (p.reports.length > repBefore) {
+        push(username, { type:'reports', items: p.reports.slice(repBefore) });
+      }
+    }
+  }
+}, 1000);
+
+setInterval(() => saveState(), 15000);
+
+// ── ЗАПУСК ───────────────────────────────────────────────────────────
+loadState();
+
+server.listen(PORT, '0.0.0.0', () => {
+  const nets = os.networkInterfaces();
+  const ips  = Object.values(nets).flat().filter(n=>n.family==='IPv4'&&!n.internal).map(n=>n.address);
+
+  console.log('\n╔══════════════════════════════════════════════╗');
+  console.log('║        ⚔  СРЕДНЕВЕКОВЬЕ  ⚔                  ║');
+  console.log('╠══════════════════════════════════════════════╣');
+  console.log(`║  На этом устройстве:                         ║`);
+  console.log(`║  👉  http://localhost:${PORT}                    ║`);
+  if (ips.length) {
+    console.log(`║                                              ║`);
+    console.log(`║  Для других в сети Wi-Fi:                    ║`);
+    ips.forEach(ip => console.log(`║  📱  http://${ip}:${PORT}`.padEnd(47)+'║'));
+  }
+  console.log(`║                                              ║`);
+  console.log(`║  Внешний IP: 128.71.88.77:${PORT}               ║`);
+  console.log('╚══════════════════════════════════════════════╝\n');
+});
+
+process.on('SIGINT', () => {
+  console.log('\nСохраняю и выхожу...');
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify(STATE)); } catch {}
+  process.exit(0);
+});
