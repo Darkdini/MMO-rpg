@@ -14,7 +14,7 @@ const STATE_FILE = process.env.STATE_PATH || path.join(__dirname, 'state.json');
 const PUBLIC     = path.join(__dirname, 'public');
 
 // ── АДМИНИСТРАТОРЫ ───────────────────────────────────────────────────
-const ADMINS = new Set();
+const ADMINS = new Set(['Admin']); // встроенный аккаунт всегда админ
 try {
   const adminFile = path.join(__dirname, 'admins.txt');
   if (fs.existsSync(adminFile)) {
@@ -43,6 +43,18 @@ function loadState() {
     STATE.world = G.createWorldGrid();
     G.initProvince(STATE.world);
   }
+  ensureAdminAccount();
+}
+
+function ensureAdminAccount() {
+  if (STATE.players['Admin']) return;
+  const salt = newSalt();
+  const admin = G.createPlayer('human', 'Администрация');
+  admin.username    = 'Admin';
+  admin.passwordSalt = salt;
+  admin.passwordHash = hashPw('@1234', salt);
+  STATE.players['Admin'] = admin;
+  console.log('[admin] Создан встроенный аккаунт Admin (@1234)');
 }
 
 let _saveTimer = null;
